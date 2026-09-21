@@ -1,0 +1,124 @@
+Build Prompt: "Personal Budget Tracker" (Apple-inspired web app)
+Goal
+Build a single-user personal budget tracker web app for a student who receives money weekly. It must feel like a real, usable product with an Apple-inspired design language — minimal, clean, editorial, lots of whitespace, hairline dividers, soft shadows, and monospace numerals. No onboarding, no auth; it's one person's private dashboard.
+
+Tech stack (mandatory)
+React 19 + Vite + TypeScript
+Tailwind CSS v4 via the @tailwindcss/vite plugin (no tailwind.config.js, no PostCSS config). Import Tailwind in src/index.css with @import 'tailwindcss';.
+Entry: src/main.tsx mounts src/App.tsx into #root and imports src/index.css.
+No component/UI library — build all UI by hand with Tailwind utilities + inline style for exact color tokens and shadows.
+Fonts
+Wire in src/index.css, with @import rules FIRST (before @import 'tailwindcss';):
+
+Inter (weights 300–700) — all UI text. Loaded via Google Fonts CSS2.
+DM Mono (weights 400, 500) — ALL numeric/currency values (balances, amounts, percentages, dates in amount columns). Expose as Tailwind @theme tokens --font-sans and --font-mono. Apply DM Mono via inline style={{ fontFamily: "'DM Mono', monospace" }} on every money figure.
+Design tokens (define in @theme in index.css, use everywhere — be consistent)
+Background:        #F5F5F7   (page)
+Card:              #FFFFFF
+Primary blue:      #007AFF   (hover #0066DD)
+Green (positive):  #34C759   (hover #2DAE4E), light bg #EAFAF0
+Red (negative):    #FF3B30,  light bg #FFF0EF
+Orange:            #FF9500
+Purple:            #AF52DE
+Teal:              #30B0C7
+Indigo:            #5856D6
+Label (primary text):    #1D1D1F
+Secondary text:          #6E6E73
+Tertiary/muted text:     #AEAEB2
+Hairline divider:        rgba(0,0,0,0.06) – rgba(0,0,0,0.08)
+Blue tint bg:            #EBF4FF
+Standard card shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04). Card radius: rounded-2xl (16px) for cards, rounded-3xl for hero panels, rounded-xl for inputs/buttons, rounded-full for pills/avatars. Global: enable font antialiasing; hide scrollbars (::-webkit-scrollbar { display:none }, scrollbar-width:none). Do NOT add an unlayered * CSS reset.
+
+Architecture — shared budget store (the core)
+The single most important rule: there is one source of truth for spendable cash, so income and expenses added anywhere update the balance everywhere.
+
+Create src/store.tsx exposing a React Context BudgetProvider + useBudget() hook.
+
+Data model:
+
+type TxType = 'income' | 'expense'
+interface Transaction { id:number; type:TxType; amount:number; label:string; category:string; date:string /* ISO */ }
+Category metadata (color + emoji icon) as two maps:
+
+EXPENSE_CATEGORIES: Groceries 🛒 #34C759, Food & Dining 🍔 #FF9500, Shopping 🛍️ #FF3B30, Transport 🚌 #007AFF, Entertainment 🎬 #AF52DE, Health 💊 #30B0C7, Bills 🧾 #5856D6, Other 📋 #8E8E93.
+INCOME_CATEGORIES: Allowance 💵 #34C759, Job 💼 #007AFF, Gift 🎁 #AF52DE, Refund ↩️ #FF9500, Other ➕ #8E8E93.
+Export catMeta(type, category) and fmt(n) (toLocaleString USD, 2 decimals).
+Store logic:
+
+Holds openingBalance (seed 180.00) and a transactions array.
+balance = openingBalance + Σincome − Σexpense (computed, never stored separately).
+addTransaction(tx: Omit<Transaction,'id'>): number — prepends, returns new id.
+removeTransaction(id).
+Persist to localStorage (key budget.v1) via useEffect on state; load on init with try/catch fallback to seed. This makes it feel like a real user's saved data.
+Seed a realistic student September 2026 month: three weekly Allowance incomes of $150 (on the 1st, 8th, 15th), a $60 Job (tutoring) income, and everyday expenses (grocery runs, coffee & bagel, bus pass, bread & milk, movie night, lunch, notebook & pens, Spotify) so the app looks lived-in on first load.
+Wrap the whole app tree in <BudgetProvider> inside App.tsx.
+
+App shell (src/App.tsx)
+Full-height page, #F5F5F7 background.
+Sticky frosted-glass top nav bar (backdrop-filter: blur(24px), rgba(245,245,247,0.82) bg, 1px bottom hairline), h-14, content constrained to max-w-5xl mx-auto px-6, flex items-center justify-between.
+Left: user identity — a blue circular avatar with initials "TB", then (hidden on small screens) name "Taylor Brooks" over muted subtitle "Personal budget". No logo, no app name.
+Right: plain-text navigation tabs (Home, Wallet, Expenses, People). Active tab: weight 500, dark #1D1D1F text, rgba(0,0,0,0.07) pill background, rounded-lg; inactive: #8E8E93, transparent, subtle hover tint. Tabs sit flush right (nav uses justify-between against the user block).
+Main: max-w-5xl mx-auto px-6 py-10, renders the active view. Tab state is local useState; no router needed.
+Views
+1. Home (src/views/HomeView.tsx) — monthly overview, editorial layout
+Reads from the store; everything derives from transactions (live).
+
+Month picker row: two round chevron buttons + "Month 2026" label. Default to September (seeded). Filter transactions to selected month of 2026.
+Balance headline: small uppercase tracked label "Available Balance", then the live balance in DM Mono at text-6xl, tight letter-spacing. Beside it, a circular blue "+" icon button ("Add money") that rotates its icon to an × when its form is open. Below: a line "±$X net in {Month}" colored green/red.
+Add-money inline form (toggled): amount, source (income category select), optional note. Confirm button is green ("Add to balance"). On submit, addTransaction({type:'income',...}) and jump the month view to today so the user sees it land. Enter key submits.
+Stats strip: one white rounded-2xl card, 3 equal columns divided by left hairlines: Income (green), Spent (red), Net (dark, red if negative). Values in DM Mono, shortened ($1.2k) via a fmtShort helper.
+"Where it went" spending breakdown (derived by grouping this month's expenses by category, sorted desc):
+Small uppercase label + "$X total" on the right.
+A thin segmented proportion bar (h-1.5, rounded, 1px gaps) where each segment width = category share, colored by category.
+A white card of category rows: each row has a tiny colored dot + category name (left), and percentage + amount (right, DM Mono). Behind each row, an ultra-faint category-colored fill (${color}09) sized to its percentage. Hairline dividers between rows.
+Empty state when no spending in the month.
+Save rate footer: "Save rate this month" + (net/income)*100% (green/red), shown only when income > 0.
+2. Wallet (src/views/WalletView.tsx) — accounts & net worth (standalone local state; not tied to the cash store)
+Net worth hero: large dark gradient (#1D1D1F → #3A3A3C) rounded-3xl panel with a faint white circle accent. "Net Worth" label + big DM Mono value; below, Assets (green +) and Liabilities (red −) split by a faint vertical divider.
+Wallet cards list: each account rendered as a credit-card-style gradient tile (rounded-2xl, per-wallet gradient), showing type · institution, name, masked ···· last4, and balance in DM Mono. Clicking selects/deselects with a subtle scale + colored glow shadow. Negative (credit) balances show a "−" and "Outstanding balance" note.
+Seed 5 wallets: Main Checking (dark), High-Yield Savings (blue), Cash on Hand (green), Investment Portfolio (purple), Credit Card (gray, negative).
+Allocation card: white card listing each wallet with a colored dot, name, amount, and % of total assets.
+3. Expenses (src/views/ExpensesView.tsx) — free-form spending + recurring bills, wired to the store
+Balance banner: uppercase "Balance after spending" label + live balance (DM Mono, red if negative).
+"Log an expense" quick-add card: headline + helper text ("Bought something? Add it here — it comes straight out of your balance."). A single responsive row: text input ("What did you buy? e.g. Bread") + category select + amount input + blue "+ Add" button. Enter submits. On submit, addTransaction({type:'expense',...}) → instantly deducts from balance.
+Spending history (all expense transactions, newest first): header "Spending" + "$X total". A dense, single-line list (maximize density): small category swatch (emoji on tinted bg), label (truncates, flex-1), subtle category tag (hidden on mobile), date (Sep 9, fixed-width right-aligned), amount −$X (DM Mono, fixed-width right), and a hover-only red circular delete button. Thin py-2.5 rows, hairline dividers, faint row hover. Empty state when none.
+Bills & subscriptions planner (local state, but paying logs a real transaction): header shows "$X paid · $X due". White card list of recurring bills, each with a circular checkbox (fills with category color + white check when paid), name (strikethrough when paid), "Due Nth · monthly", and amount. Toggling paid calls addTransaction (deduct) and stores the returned txId on the bill; toggling back calls removeTransaction(txId) to reverse. Paid rows dim to 0.6 opacity. Seed bills (all start unpaid): Rent (room share) $520, Phone Plan $25, Spotify $9.99, Gym Membership $29, Student Loan $120.
+4. People (src/views/PeopleView.tsx) — who owes you, wired to the store
+Tracks people who owe the user money, with partial payments, progress, and auto-settle. Collecting money adds it to the balance as income (category "Other", label Repayment · {name}) — keeps the whole app consistent.
+
+Hero panel: light blue gradient rounded-3xl, uppercase "Still owed to you" + big blue DM Mono total remaining; below, "Collected so far" (green +) and "People outstanding" count, split by a faint divider.
+Tabs + Add: segmented "outstanding (n) / settled (n)" pill toggle; a circular blue "+" icon button (rotates to × when the add form is open) matching Home's add button.
+Add form: name, amount, reason.
+Debtor list with clear hierarchy per row:
+Colored circular avatar (initials), name (primary), then reason · date as one quiet secondary line.
+Right side: remaining amount as the dominant DM Mono figure with "of $total" beneath — or a green ✓ "Settled" badge.
+Below (only while outstanding): a thin progress bar (blue fill = % paid), a status line ("$X paid · N%" or "No payments yet"), and compact actions "Record payment" and "Settle".
+"Record payment" opens an inline blue-tinted panel: amount input (max = remaining, Enter submits) + Confirm. Clamps to remaining; calls collect() → income transaction; auto-settles when fully paid.
+Settled rows: dimmed avatar + a hover-only red "Remove record" button.
+Empty states with an emoji for each tab.
+Cross-cutting requirements
+Consistency: reuse the exact same color tokens, card shadow, radii, and DM-Mono-for-numbers rule across all four views. Add buttons everywhere use the same rotating "+/×" circular icon pattern.
+Hierarchy: primary figure large + DM Mono; supporting info small and muted (#AEAEB2); labels uppercase-tracked where used as section headers.
+Inputs: rgba(0,0,0,0.04) fill, transparent 1.5px border that turns #007AFF on focus, rounded-xl.
+All money in DM Mono; negatives use the "−" minus glyph, not a hyphen.
+Keep everything typechecking clean (tsc --noEmit). Avoid a second top-level component in App.tsx that uses hooks (Vite Fast Refresh can choke on it) — put any such helper in its own file.
+Must be genuinely usable: add weekly allowance income, log ad-hoc expenses that deduct instantly, pay bills, and record repayments — all reflected in the persisted balance across every tab.
+File layout
+src/
+  main.tsx
+  index.css          (font @imports, tailwind import, @theme tokens, globals)
+  App.tsx            (BudgetProvider wrap, sticky frosted nav, tab routing)
+  store.tsx          (BudgetProvider, useBudget, categories, fmt, seed, localStorage)
+  views/
+    HomeView.tsx
+    WalletView.tsx
+    ExpensesView.tsx
+    PeopleView.tsx
+Acceptance criteria
+npm run dev boots; tsc --noEmit passes with no errors.
+Adding money on Home increases the balance immediately and persists across a page reload.
+Logging an expense on Expenses deducts from the balance immediately and appears in Home's "Where it went" breakdown for that month.
+Marking a bill paid deducts it; un-checking restores the balance exactly.
+Recording a repayment on People increases the balance and advances the person's progress; full payment moves them to "settled".
+All four tabs share one balance value; no view shows a stale or independent balance.
+Visual language is consistent (tokens, shadows, radii, DM Mono numerals) across every screen.
