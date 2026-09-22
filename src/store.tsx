@@ -187,6 +187,7 @@ function calcBalance(s: StoreState): number {
 
 const STORAGE_KEY = 'budget.v3'
 const OLD_V2_KEY = 'budget.v2'
+const OLD_V1_KEY = 'budget.v1'
 
 const AVATAR_COLORS = [
   '#0A6CFF', '#0E9E6E', '#E07E2E', '#8B5CF6',
@@ -281,7 +282,47 @@ function loadState(): StoreState {
     console.error("Migration failed:", e)
   }
 
-  // 3. Fallback to empty fresh state (demo data was originally generated here, but now we'll just return empty)
+  try {
+    // 3. Try to migrate from v1 (which stored amounts in dollars directly)
+    const rawV1 = localStorage.getItem(OLD_V1_KEY)
+    if (rawV1) {
+      const old = JSON.parse(rawV1)
+      
+      const transactions = (old.transactions || []).map((t: any) => {
+        let date = t.date || new Date().toISOString().slice(0, 10)
+        if (date.length > 10) date = date.slice(0, 10) // Convert ISO string to YYYY-MM-DD
+        
+        return {
+          id: String(t.id || newId()),
+          type: t.type === 'income' || t.type === 'expense' ? t.type : 'expense',
+          amount: Math.abs(t.amount || 0),
+          label: t.label || '',
+          category: t.category || 'Other',
+          date: date,
+        }
+      })
+
+      const openingBalance = old.settings?.openingBalance ?? old.openingBalance ?? 0
+
+      const migrated: StoreState = {
+        openingBalance,
+        transactions,
+        wallets: [
+          { id: 'w1', kind: 'checking', name: 'Main Checking', institution: 'Bank', last4: '', balance: openingBalance, gradient: GRADIENTS[0]! }
+        ],
+        bills: [],
+        billPayments: [],
+        debtors: [],
+      }
+      
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated))
+      return migrated
+    }
+  } catch (e) {
+    console.error("V1 Migration failed:", e)
+  }
+
+  // 4. Fallback to empty fresh state
   return {
     openingBalance: 0,
     transactions: [],
