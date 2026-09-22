@@ -1,352 +1,166 @@
-/**
- * WalletView — accounts & net worth.
- * Net worth hero, wallet cards, linked wallet, add/edit forms, allocation.
- */
+import { useState } from 'react'
+import { useBudget, P, fmt } from '../store'
 
-import { useState, useMemo } from 'react'
-import { useBudget, selectWalletView } from '../store'
-import { Money } from '../components/Money'
-import { AddButton } from '../components/AddButton'
-import { toCents } from '../lib/money'
-import type { WalletKind } from '../store/types'
+/* ── Types ────────────────────────────────────────────────── */
 
-const WALLET_GRADIENTS: Record<WalletKind, string> = {
-  checking: 'linear-gradient(135deg, #1D1D1F 0%, #3A3A3C 100%)',
-  savings: 'linear-gradient(135deg, #007AFF 0%, #5AC8FA 100%)',
-  cash: 'linear-gradient(135deg, #34C759 0%, #30B0C7 100%)',
-  investment: 'linear-gradient(135deg, #AF52DE 0%, #5856D6 100%)',
-  credit: 'linear-gradient(135deg, #636366 0%, #8E8E93 100%)',
+import { type WalletAccount } from '../store'
+
+const kindLabels: Record<string, string> = {
+  checking: 'Checking', savings: 'Savings', cash: 'Cash',
+  investment: 'Investment', credit: 'Credit',
 }
 
-const WALLET_KINDS: { kind: WalletKind; label: string }[] = [
-  { kind: 'checking', label: 'Checking' },
-  { kind: 'savings', label: 'Savings' },
-  { kind: 'cash', label: 'Cash' },
-  { kind: 'investment', label: 'Investment' },
-  { kind: 'credit', label: 'Credit' },
-]
+/* ── Component ────────────────────────────────────────────── */
 
 export function WalletView() {
-  const { state, balanceCents, addWallet, updateWallet, removeWallet } = useBudget()
-  const [showAdd, setShowAdd] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const { wallets, updateWallet } = useBudget()
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
 
-  // Add form state
-  const [newName, setNewName] = useState('')
-  const [newKind, setNewKind] = useState<WalletKind>('savings')
-  const [newInstitution, setNewInstitution] = useState('')
-  const [newLast4, setNewLast4] = useState('')
-  const [newBalance, setNewBalance] = useState('')
-  const [addError, setAddError] = useState('')
+  const assets = wallets.filter(w => w.balance >= 0).reduce((s, w) => s + w.balance, 0)
+  const liabilities = wallets.filter(w => w.balance < 0).reduce((s, w) => s + Math.abs(w.balance), 0)
+  const netWorth = assets - liabilities
 
-  // Edit form state
-  const [editName, setEditName] = useState('')
-  const [editInstitution, setEditInstitution] = useState('')
-  const [editLast4, setEditLast4] = useState('')
-  const [editBalance, setEditBalance] = useState('')
-
-  const view = useMemo(() => selectWalletView(state, balanceCents), [state, balanceCents])
-
-  const assetWallets = view.wallets.filter(w => w.balanceCents > 0)
-  const totalAssets = assetWallets.reduce((sum, w) => sum + w.balanceCents, 0)
-
-  const handleAdd = () => {
-    if (!newName.trim()) { setAddError('Enter a name.'); return }
-    const cents = toCents(newBalance)
-    if (!cents && newBalance.trim() !== '0') { setAddError('Enter a valid balance.'); return }
-
-    const balanceCentsVal = cents ?? 0
-    addWallet({
-      kind: newKind,
-      name: newName.trim(),
-      institution: newInstitution.trim(),
-      last4: newLast4.trim() || undefined,
-      balanceCents: newKind === 'credit' ? -Math.abs(balanceCentsVal) : balanceCentsVal,
-    })
-    setNewName(''); setNewKind('savings'); setNewInstitution(''); setNewLast4(''); setNewBalance('')
-    setAddError('')
-    setShowAdd(false)
+  function startEdit(w: WalletAccount) {
+    setEditingId(w.id)
+    setEditValue(String(Math.abs(w.balance)))
   }
 
-  const handleSelect = (id: string) => {
-    const wallet = state.wallets.find(w => w.id === id)
-    if (!wallet || wallet.linked) {
-      setSelectedId(selectedId === id ? null : id)
-      return
-    }
-    if (selectedId === id) {
-      setSelectedId(null)
-      return
-    }
-    setSelectedId(id)
-    setEditName(wallet.name)
-    setEditInstitution(wallet.institution)
-    setEditLast4(wallet.last4 ?? '')
-    setEditBalance((Math.abs(wallet.balanceCents) / 100).toFixed(2))
+  function saveEdit(w: WalletAccount) {
+    const n = parseFloat(editValue)
+    if (isNaN(n) || n < 0) { setEditingId(null); return }
+    const newBal = w.kind === 'credit' ? -n : n
+    updateWallet(w.id, Math.round(newBal * 100) / 100)
+    setEditingId(null)
   }
 
-  const handleSaveEdit = () => {
-    if (!selectedId) return
-    const wallet = state.wallets.find(w => w.id === selectedId)
-    if (!wallet || wallet.linked) return
-
-    const cents = toCents(editBalance)
-    const balanceVal = cents ?? 0
-
-    updateWallet(selectedId, {
-      name: editName.trim() || wallet.name,
-      institution: editInstitution.trim(),
-      last4: editLast4.trim() || undefined,
-      balanceCents: wallet.kind === 'credit' ? -Math.abs(balanceVal) : balanceVal,
-    })
-    setSelectedId(null)
-  }
-
-  const handleDelete = (id: string) => {
-    removeWallet(id)
-    setSelectedId(null)
-  }
+  function cancelEdit() { setEditingId(null) }
 
   return (
-    <div className="space-y-6">
-      {/* Net worth hero */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* ── Net worth hero ────────────────────────────────── */}
       <div
-        className="rounded-3xl p-6 sm:p-8 relative overflow-hidden"
         style={{
-          background: 'linear-gradient(135deg, #1D1D1F 0%, #3A3A3C 100%)',
+          background: 'linear-gradient(135deg, #1F2024, #35363B)',
+          borderRadius: 20, padding: '32px 28px',
+          boxShadow: P.shadowMd, position: 'relative', overflow: 'hidden',
         }}
       >
-        {/* Decorative circle */}
-        <div
-          className="absolute -right-16 -top-16 w-48 h-48 rounded-full"
-          style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}
-        />
-        <p className="text-[11px] font-semibold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,255,255,0.5)' }}>
-          Net Worth
-        </p>
-        <Money cents={view.netWorth} className="text-4xl sm:text-5xl font-medium text-white" />
-
-        <div className="flex items-center gap-6 mt-4">
+        {/* Subtle radial accent */}
+        <div style={{
+          position: 'absolute', top: -40, right: -40,
+          width: 200, height: 200, borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 70%)',
+        }} />
+        <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.5)', marginBottom: 8, fontWeight: 500 }}>
+          NET WORTH
+        </div>
+        <div className="mono" style={{
+          fontSize: 40, fontWeight: 500,
+          color: netWorth < 0 ? '#FF7A6E' : '#fff',
+          lineHeight: 1.1, marginBottom: 20,
+        }}>
+          {netWorth < 0 ? '\u2212' : ''}{fmt(Math.abs(netWorth)).replace(/^-/, '')}
+        </div>
+        <div style={{ display: 'flex', gap: 24 }}>
           <div>
-            <p className="text-[11px] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>Assets</p>
-            <Money cents={view.assets} signed className="text-base font-medium" style={{ color: '#34C759', fontFamily: "'DM Mono', monospace" }} />
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>Assets</div>
+            <div className="mono" style={{ fontSize: 18, color: '#3DDC97', fontWeight: 500 }}>
+              +{fmt(assets)}
+            </div>
           </div>
-          <div style={{ width: '1px', height: '28px', backgroundColor: 'rgba(255,255,255,0.1)' }} />
+          <div style={{ width: 1, background: 'rgba(255,255,255,0.1)', alignSelf: 'stretch' }} />
           <div>
-            <p className="text-[11px] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>Liabilities</p>
-            <Money cents={-view.liabilities} className="text-base font-medium" style={{ color: '#FF3B30', fontFamily: "'DM Mono', monospace" }} />
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>Liabilities</div>
+            <div className="mono" style={{ fontSize: 18, color: '#FF7A6E', fontWeight: 500 }}>
+              {'\u2212'}{fmt(liabilities)}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Wallet cards header */}
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: '#6E6E73' }}>
-          Accounts
-        </p>
-        <AddButton isOpen={showAdd} onClick={() => setShowAdd(!showAdd)} label="Add wallet" />
-      </div>
+      {/* ── Wallet cards ──────────────────────────────────── */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {wallets.map(w => {
+          const isExpanded = expandedId === w.id
+          const isEditing = editingId === w.id
+          const isCredit = w.kind === 'credit'
 
-      {/* Add wallet form */}
-      {showAdd && (
-        <div
-          className="rounded-2xl p-5"
-          style={{
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-            <input
-              type="text"
-              placeholder="Account name"
-              value={newName}
-              onChange={e => { setNewName(e.target.value); setAddError('') }}
-              className="h-11 px-3 rounded-xl text-sm outline-none"
-              style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F' }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-            />
-            <select
-              value={newKind}
-              onChange={e => setNewKind(e.target.value as WalletKind)}
-              className="h-11 px-3 rounded-xl text-sm outline-none cursor-pointer"
-              style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F' }}
-            >
-              {WALLET_KINDS.map(w => (
-                <option key={w.kind} value={w.kind}>{w.label}</option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-            <input
-              type="text"
-              placeholder="Institution"
-              value={newInstitution}
-              onChange={e => setNewInstitution(e.target.value)}
-              className="h-11 px-3 rounded-xl text-sm outline-none"
-              style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F' }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-            />
-            <input
-              type="text"
-              placeholder="Last 4 digits"
-              maxLength={4}
-              value={newLast4}
-              onChange={e => setNewLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              className="h-11 px-3 rounded-xl text-sm outline-none"
-              style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F', fontFamily: "'DM Mono', monospace" }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder={newKind === 'credit' ? 'Outstanding amount' : 'Balance'}
-              value={newBalance}
-              onChange={e => { setNewBalance(e.target.value); setAddError('') }}
-              className="h-11 px-3 rounded-xl text-sm outline-none"
-              style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F', fontFamily: "'DM Mono', monospace" }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-            />
-          </div>
-          {addError && <p className="text-xs mb-2" style={{ color: '#FF3B30' }}>{addError}</p>}
-          <button
-            onClick={handleAdd}
-            className="w-full h-11 rounded-xl text-sm font-medium text-white cursor-pointer"
-            style={{ backgroundColor: '#007AFF' }}
-          >
-            Add account
-          </button>
-        </div>
-      )}
-
-      {/* Wallet cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {view.wallets.map(wallet => {
-          const isSelected = selectedId === wallet.id
-          const isLinked = wallet.linked
           return (
-            <div key={wallet.id}>
-              <button
-                onClick={() => handleSelect(wallet.id)}
-                className="w-full text-left rounded-2xl p-5 transition-transform cursor-pointer"
+            <div key={w.id}>
+              {/* Card */}
+              <div
+                onClick={() => setExpandedId(isExpanded ? null : w.id)}
                 style={{
-                  background: WALLET_GRADIENTS[wallet.kind as WalletKind] ?? WALLET_GRADIENTS.checking,
-                  transform: isSelected ? 'scale(1.02)' : 'scale(1)',
-                  boxShadow: isSelected
-                    ? '0 8px 32px rgba(0,122,255,0.2), 0 2px 8px rgba(0,0,0,0.1)'
-                    : '0 2px 8px rgba(0,0,0,0.1)',
+                  background: w.gradient,
+                  borderRadius: isExpanded ? '16px 16px 0 0' : 16,
+                  padding: '22px 24px',
+                  cursor: 'pointer',
+                  boxShadow: P.shadowSm,
+                  transition: 'border-radius 0.2s',
                 }}
               >
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-[11px] uppercase tracking-wide" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                    {wallet.kind}{wallet.institution ? ` · ${wallet.institution}` : ''}
-                  </span>
-                  {isLinked && (
-                    <span
-                      className="px-2 py-0.5 rounded-full text-[10px] font-medium"
-                      style={{ backgroundColor: 'rgba(52,199,89,0.3)', color: '#34C759' }}
-                    >
-                      Live
-                    </span>
-                  )}
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 2 }}>
+                  {kindLabels[w.kind]} {w.institution ? `· ${w.institution}` : ''}
                 </div>
-                <p className="text-base font-medium text-white mb-1">{wallet.name}</p>
-                {wallet.last4 && (
-                  <p className="text-xs mb-3" style={{ color: 'rgba(255,255,255,0.4)', fontFamily: "'DM Mono', monospace" }}>
-                    ···· {wallet.last4}
-                  </p>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#fff', marginBottom: 2 }}>
+                  {w.name}
+                </div>
+                {w.last4 && (
+                  <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>
+                    ···· {w.last4}
+                  </div>
                 )}
-                <Money
-                  cents={wallet.balanceCents}
-                  className="text-2xl font-medium text-white"
-                />
-                {isLinked && (
-                  <p className="text-[11px] mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                    Synced with Available Balance
-                  </p>
-                )}
-                {wallet.balanceCents < 0 && (
-                  <p className="text-[11px] mt-1" style={{ color: 'rgba(255,59,48,0.8)' }}>
+                <div className="mono" style={{ fontSize: 28, fontWeight: 500, color: '#fff', lineHeight: 1.2 }}>
+                  {isCredit ? `\u2212${fmt(Math.abs(w.balance))}` : fmt(w.balance)}
+                </div>
+                {isCredit && (
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginTop: 4 }}>
                     Outstanding balance
-                  </p>
+                  </div>
                 )}
-              </button>
+              </div>
 
-              {/* Edit panel for manual wallets */}
-              {isSelected && !isLinked && (
-                <div
-                  className="mt-2 rounded-2xl p-4"
-                  style={{
-                    backgroundColor: '#FFFFFF',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-                  }}
-                >
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <input
-                      type="text"
-                      placeholder="Name"
-                      value={editName}
-                      onChange={e => setEditName(e.target.value)}
-                      className="h-10 px-3 rounded-xl text-sm outline-none"
-                      style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F' }}
-                      onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-                      onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-                    />
-                    <input
-                      type="text"
-                      placeholder="Institution"
-                      value={editInstitution}
-                      onChange={e => setEditInstitution(e.target.value)}
-                      className="h-10 px-3 rounded-xl text-sm outline-none"
-                      style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F' }}
-                      onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-                      onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <input
-                      type="text"
-                      placeholder="Last 4"
-                      maxLength={4}
-                      value={editLast4}
-                      onChange={e => setEditLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                      className="h-10 px-3 rounded-xl text-sm outline-none"
-                      style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F', fontFamily: "'DM Mono', monospace" }}
-                      onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-                      onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-                    />
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="Balance"
-                      value={editBalance}
-                      onChange={e => setEditBalance(e.target.value)}
-                      className="h-10 px-3 rounded-xl text-sm outline-none"
-                      style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F', fontFamily: "'DM Mono', monospace" }}
-                      onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-                      onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-                    />
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleSaveEdit}
-                      className="flex-1 h-10 rounded-xl text-sm font-medium text-white cursor-pointer"
-                      style={{ backgroundColor: '#007AFF' }}
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => handleDelete(wallet.id)}
-                      className="h-10 px-4 rounded-xl text-sm font-medium cursor-pointer"
-                      style={{ backgroundColor: 'rgba(255,59,48,0.08)', color: '#FF3B30' }}
-                    >
-                      Delete
-                    </button>
-                  </div>
+              {/* Expanded edit panel */}
+              {isExpanded && (
+                <div style={{
+                  background: P.card, borderRadius: '0 0 16px 16px',
+                  padding: '18px 24px',
+                  borderTop: `1px solid ${P.hair}`,
+                  boxShadow: P.shadowSm,
+                }}>
+                  {!isEditing ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontSize: 12, color: P.tertiary }}>Current balance</div>
+                        <div className="mono" style={{ fontSize: 18, fontWeight: 500, color: isCredit ? P.red.text : P.ink }}>
+                          {isCredit ? `\u2212${fmt(Math.abs(w.balance))}` : fmt(w.balance)}
+                        </div>
+                      </div>
+                      <button onClick={() => startEdit(w)} style={softBlueBtnStyle}>
+                        Edit balance
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ color: P.secondary, fontSize: 16 }}>$</span>
+                      <input
+                        type="number"
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') saveEdit(w)
+                          if (e.key === 'Escape') cancelEdit()
+                        }}
+                        className="mono"
+                        style={{ ...inputStyle, flex: 1 }}
+                        autoFocus
+                      />
+                      <button onClick={() => saveEdit(w)} style={softBlueBtnStyle}>Save</button>
+                      <button onClick={cancelEdit} style={softGrayBtnStyle}>Cancel</button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -354,50 +168,62 @@ export function WalletView() {
         })}
       </div>
 
-      {/* Allocation card */}
-      {assetWallets.length > 0 && (
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-widest mb-3" style={{ color: '#6E6E73' }}>
-            Allocation
-          </p>
-          <div
-            className="rounded-2xl overflow-hidden"
-            style={{
-              backgroundColor: '#FFFFFF',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-            }}
-          >
-            {assetWallets.map((w, i) => {
-              const pct = totalAssets > 0 ? Math.round((w.balanceCents / totalAssets) * 100) : 0
-              const kind = w.kind as WalletKind
-              const colors: Record<WalletKind, string> = {
-                checking: '#1D1D1F',
-                savings: '#007AFF',
-                cash: '#34C759',
-                investment: '#AF52DE',
-                credit: '#636366',
-              }
-              return (
-                <div
-                  key={w.id}
-                  className="flex items-center px-4 py-3"
-                  style={i > 0 ? { borderTop: '1px solid rgba(0,0,0,0.06)' } : {}}
-                >
-                  <div
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: colors[kind] ?? '#8E8E93' }}
-                  />
-                  <span className="ml-3 text-sm flex-1" style={{ color: '#1D1D1F' }}>{w.name}</span>
-                  <Money cents={w.balanceCents} className="text-sm mr-3" />
-                  <span className="text-xs w-8 text-right" style={{ color: '#6E6E73', fontFamily: "'DM Mono', monospace" }}>
-                    {pct}%
-                  </span>
-                </div>
-              )
-            })}
-          </div>
+      {/* ── Allocation card ───────────────────────────────── */}
+      <div>
+        <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: P.tertiary, marginBottom: 12, fontWeight: 500, padding: '0 4px' }}>
+          ALLOCATION
         </div>
-      )}
+        <div style={{ background: P.card, borderRadius: 16, boxShadow: P.shadowSm, overflow: 'hidden' }}>
+          {wallets.map((w, i) => {
+            const isLiability = w.balance < 0
+            const pct = assets > 0 && !isLiability ? ((w.balance / assets) * 100).toFixed(1) : null
+            const dotColor = w.gradient.match(/#[0-9A-Fa-f]{6}/)?.[0] ?? P.secondary
+
+            return (
+              <div
+                key={w.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '14px 18px',
+                  borderTop: i > 0 ? `1px solid ${P.hair}` : 'none',
+                }}
+              >
+                <div style={{ width: 10, height: 10, borderRadius: 5, background: dotColor, flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: P.ink }}>{w.name}</span>
+                <span className="mono" style={{ fontSize: 14, fontWeight: 500, color: isLiability ? P.red.text : P.ink, width: 100, textAlign: 'right' }}>
+                  {isLiability ? `\u2212${fmt(Math.abs(w.balance))}` : fmt(w.balance)}
+                </span>
+                <span className="mono" style={{ fontSize: 13, color: P.tertiary, width: 52, textAlign: 'right' }}>
+                  {pct !== null ? `${pct}%` : '\u2014'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
+}
+
+/* ── Shared styles ─────────────────────────────────────────── */
+
+const inputStyle: React.CSSProperties = {
+  padding: '10px 14px', fontSize: 15,
+  background: 'rgba(0,0,0,0.035)', borderRadius: 12,
+  border: '1.5px solid transparent', outline: 'none',
+  color: P.ink, fontFamily: 'inherit',
+}
+
+const softBlueBtnStyle: React.CSSProperties = {
+  padding: '8px 16px', borderRadius: 10,
+  background: P.blue.soft, color: P.blue.text,
+  border: 'none', cursor: 'pointer',
+  fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+}
+
+const softGrayBtnStyle: React.CSSProperties = {
+  padding: '8px 16px', borderRadius: 10,
+  background: 'rgba(0,0,0,0.05)', color: P.secondary,
+  border: 'none', cursor: 'pointer',
+  fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
 }

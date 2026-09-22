@@ -1,375 +1,320 @@
-/**
- * PeopleView — who owes you.
- * Hero panel, outstanding/settled tabs, add form, debtor cards with progress.
- */
-
 import { useState, useMemo } from 'react'
-import { useBudget, useMoney, selectDebtorProgress, selectTotalOwed } from '../store'
-import { Money } from '../components/Money'
-import { AddButton } from '../components/AddButton'
-import { shortDate } from '../lib/dates'
-import { toCents } from '../lib/money'
+import { useBudget, P, fmt } from '../store'
 
-function getInitials(name: string): string {
-  const words = name.trim().split(/\s+/)
-  if (words.length === 0 || words[0] === '') return '?'
-  if (words.length === 1) return words[0]![0]!.toUpperCase()
-  return (words[0]![0]! + words[words.length - 1]![0]!).toUpperCase()
-}
-
-const AVATAR_COLORS = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF3B30', '#5856D6', '#30B0C7']
+/* ── Component ────────────────────────────────────────────── */
 
 export function PeopleView() {
-  const { state, addDebtor, recordRepayment, settleDebtor, removeDebtor } = useBudget()
-  const { fmt } = useMoney()
-
+  const { debtors, addDebtor, recordRepayment, settleDebtor, removeDebtor } = useBudget()
   const [tab, setTab] = useState<'outstanding' | 'settled'>('outstanding')
   const [showAdd, setShowAdd] = useState(false)
-  const [name, setName] = useState('')
-  const [amountInput, setAmountInput] = useState('')
-  const [reason, setReason] = useState('')
-  const [addError, setAddError] = useState('')
-  const [payingId, setPayingId] = useState<string | null>(null)
-  const [payAmount, setPayAmount] = useState('')
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
 
-  const totals = useMemo(() => selectTotalOwed(state), [state])
-  const outstanding = state.debtors.filter(d => !d.settled)
-  const settled = state.debtors.filter(d => d.settled)
+  // Add form
+  const [addName, setAddName] = useState('')
+  const [addAmount, setAddAmount] = useState('')
+  const [addReason, setAddReason] = useState('')
 
-  const handleAdd = () => {
-    if (!name.trim()) { setAddError('Enter a name.'); return }
-    const cents = toCents(amountInput)
-    if (!cents) { setAddError('Enter an amount greater than $0.'); return }
-    setAddError('')
-    addDebtor({ name: name.trim(), amountCents: cents, reason: reason.trim() })
-    setName(''); setAmountInput(''); setReason('')
-    setShowAdd(false)
-    setTab('outstanding')
+  // Payment input per debtor
+  const [payInputId, setPayInputId] = useState<string | null>(null)
+  const [payValue, setPayValue] = useState('')
+
+  const outstanding = useMemo(() => debtors.filter(d => !d.settled), [debtors])
+  const settled = useMemo(() => debtors.filter(d => d.settled), [debtors])
+
+  const totalOwed = outstanding.reduce((s, d) => s + d.totalAmount - d.amountPaid, 0)
+  const totalCollected = debtors.reduce((s, d) => s + d.amountPaid, 0)
+
+  function handleAddPerson() {
+    const amt = parseFloat(addAmount)
+    if (!addName.trim() || !amt || amt <= 0) return
+    addDebtor({
+      name: addName.trim(),
+      totalAmount: Math.round(amt * 100) / 100,
+      amountPaid: 0,
+      reason: addReason.trim() || 'No reason',
+      date: new Date().toISOString().slice(0, 10),
+      settled: false,
+    })
+    setAddName(''); setAddAmount(''); setAddReason(''); setShowAdd(false)
   }
 
-  const handlePay = (debtorId: string) => {
-    const cents = toCents(payAmount)
-    if (!cents) return
-    recordRepayment(debtorId, cents)
-    setPayingId(null)
-    setPayAmount('')
+  function recordPayment(debtorId: string) {
+    const n = parseFloat(payValue)
+    if (!n || n <= 0) return
+    recordRepayment(debtorId, n)
+    setPayInputId(null); setPayValue('')
   }
 
-  const handlePayKeyDown = (e: React.KeyboardEvent, debtorId: string) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      handlePay(debtorId)
-    }
-  }
+  const visibleList = tab === 'outstanding' ? outstanding : settled
 
   return (
-    <div className="space-y-6">
-      {/* Hero panel */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* ── Hero ──────────────────────────────────────────── */}
       <div
-        className="rounded-3xl p-6 sm:p-8 relative overflow-hidden"
         style={{
-          background: 'linear-gradient(135deg, #EBF4FF 0%, #D6EAFF 100%)',
+          background: 'linear-gradient(135deg, #EAF1FE, #DCE9FF)',
+          borderRadius: 20, padding: '28px 24px',
+          boxShadow: P.shadowSm,
         }}
       >
-        <p className="text-[11px] font-semibold uppercase tracking-widest mb-2" style={{ color: '#007AFF' }}>
-          Still owed to you
-        </p>
-        <Money
-          cents={totals.totalRemaining}
-          className="text-4xl sm:text-5xl font-medium"
-          style={{ color: '#007AFF' }}
-        />
-
-        <div className="flex items-center gap-6 mt-4">
-          <div>
-            <p className="text-[11px] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(0,122,255,0.5)' }}>Collected</p>
-            <Money cents={totals.totalCollected} signed className="text-base font-medium" style={{ color: '#34C759', fontFamily: "'DM Mono', monospace" }} />
-          </div>
-          <div style={{ width: '1px', height: '28px', backgroundColor: 'rgba(0,122,255,0.15)' }} />
-          <div>
-            <p className="text-[11px] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(0,122,255,0.5)' }}>People</p>
-            <span className="text-base font-medium" style={{ color: '#1D1D1F', fontFamily: "'DM Mono', monospace" }}>
-              {totals.outstandingCount}
-            </span>
-          </div>
+        <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em', color: P.blue.text, fontWeight: 500, marginBottom: 8 }}>
+          STILL OWED TO YOU
+        </div>
+        <div className="mono" style={{ fontSize: 36, fontWeight: 500, color: P.blue.text, lineHeight: 1.1, marginBottom: 12 }}>
+          {fmt(totalOwed)}
+        </div>
+        <div style={{ display: 'flex', gap: 20, fontSize: 13 }}>
+          <span style={{ color: P.green.text }}>
+            Collected so far <span className="mono" style={{ fontWeight: 600 }}>+{fmt(totalCollected)}</span>
+          </span>
+          <span style={{ color: P.secondary }}>
+            {outstanding.length} people outstanding
+          </span>
         </div>
       </div>
 
-      {/* Tabs + Add */}
-      <div className="flex items-center justify-between">
-        <div
-          className="flex rounded-lg p-0.5"
-          style={{ backgroundColor: 'rgba(0,0,0,0.04)' }}
+      {/* ── Tabs + add button ─────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Segmented control */}
+        <div style={{
+          display: 'flex', background: 'rgba(0,0,0,0.04)', borderRadius: 10, padding: 3, flex: 1,
+        }}>
+          {(['outstanding', 'settled'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                flex: 1, padding: '8px 0', borderRadius: 8,
+                background: tab === t ? P.card : 'transparent',
+                boxShadow: tab === t ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                border: 'none', cursor: 'pointer',
+                fontSize: 13, fontWeight: tab === t ? 600 : 400,
+                color: tab === t ? P.ink : P.secondary,
+                fontFamily: 'inherit', transition: 'all 0.15s',
+              }}
+            >
+              {t === 'outstanding' ? `Outstanding (${outstanding.length})` : `Settled (${settled.length})`}
+            </button>
+          ))}
+        </div>
+        {/* Add button */}
+        <button
+          onClick={() => setShowAdd(v => !v)}
+          style={{
+            width: 38, height: 38, borderRadius: 19,
+            background: P.blue.solid, border: 'none', cursor: 'pointer',
+            color: '#fff', fontSize: 22, fontWeight: 300,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 2px 10px rgba(10,108,255,0.25)',
+            transition: 'transform 0.2s',
+            transform: showAdd ? 'rotate(45deg)' : 'rotate(0deg)',
+          }}
         >
-          <button
-            onClick={() => setTab('outstanding')}
-            className="px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer transition-colors"
-            style={{
-              backgroundColor: tab === 'outstanding' ? '#FFFFFF' : 'transparent',
-              color: tab === 'outstanding' ? '#1D1D1F' : '#6E6E73',
-              boxShadow: tab === 'outstanding' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
-            }}
-          >
-            Outstanding ({outstanding.length})
-          </button>
-          <button
-            onClick={() => setTab('settled')}
-            className="px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer transition-colors"
-            style={{
-              backgroundColor: tab === 'settled' ? '#FFFFFF' : 'transparent',
-              color: tab === 'settled' ? '#1D1D1F' : '#6E6E73',
-              boxShadow: tab === 'settled' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
-            }}
-          >
-            Settled ({settled.length})
-          </button>
-        </div>
-        <AddButton isOpen={showAdd} onClick={() => setShowAdd(!showAdd)} label="Add person" />
+          +
+        </button>
       </div>
 
-      {/* Add form */}
+      {/* ── Add person form ───────────────────────────────── */}
       {showAdd && (
-        <div
-          className="rounded-2xl p-5"
-          style={{
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-            <input
-              type="text"
-              placeholder="Name"
-              value={name}
-              onChange={e => { setName(e.target.value); setAddError('') }}
-              className="h-11 px-3 rounded-xl text-sm outline-none"
-              style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F' }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-              autoFocus
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Amount owed"
-              value={amountInput}
-              onChange={e => { setAmountInput(e.target.value); setAddError('') }}
-              className="h-11 px-3 rounded-xl text-sm outline-none"
-              style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F', fontFamily: "'DM Mono', monospace" }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-            />
+        <div style={{ background: P.card, borderRadius: 24, padding: 24, boxShadow: P.shadowMd }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <input type="text" placeholder="Name" value={addName} onChange={e => setAddName(e.target.value)} style={inputStyle} autoFocus />
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: P.secondary }}>$</span>
+              <input
+                type="number" placeholder="Amount owed"
+                value={addAmount} onChange={e => setAddAmount(e.target.value)}
+                className="mono"
+                style={{ ...inputStyle, paddingLeft: 32 }}
+              />
+            </div>
+            <input type="text" placeholder="Reason" value={addReason} onChange={e => setAddReason(e.target.value)} style={inputStyle} />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={handleAddPerson} style={blueBtnStyle}>Add person</button>
+              <button onClick={() => setShowAdd(false)} style={grayBtnStyle}>Cancel</button>
+            </div>
           </div>
-          <input
-            type="text"
-            placeholder="Reason (optional)"
-            value={reason}
-            onChange={e => setReason(e.target.value)}
-            className="w-full h-11 px-3 rounded-xl text-sm outline-none mb-3"
-            style={{ backgroundColor: 'rgba(0,0,0,0.04)', border: '1.5px solid transparent', color: '#1D1D1F' }}
-            onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-            onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
-          />
-          {addError && <p className="text-xs mb-2" style={{ color: '#FF3B30' }}>{addError}</p>}
-          <button
-            onClick={handleAdd}
-            disabled={!name.trim() || !amountInput.trim()}
-            className="w-full h-11 rounded-xl text-sm font-medium text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: '#007AFF' }}
-          >
-            Add person
-          </button>
         </div>
       )}
 
-      {/* Debtor list */}
-      {tab === 'outstanding' && outstanding.length === 0 && (
-        <div
-          className="rounded-2xl p-6 text-center"
-          style={{
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-          }}
-        >
-          <p className="text-2xl mb-2">🎉</p>
-          <p className="text-sm" style={{ color: '#6E6E73' }}>
-            Nobody owes you right now. Add someone when they borrow money.
-          </p>
+      {/* ── Debtor list ───────────────────────────────────── */}
+      {visibleList.length === 0 ? (
+        <div style={{ background: P.card, borderRadius: 16, boxShadow: P.shadowSm, padding: 32, textAlign: 'center', color: P.tertiary, fontSize: 14 }}>
+          {tab === 'outstanding' ? 'No one owes you right now' : 'No settled debts'}
         </div>
-      )}
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {visibleList.map(d => {
+            const remaining = d.totalAmount - d.amountPaid
+            const pct = d.totalAmount > 0 ? (d.amountPaid / d.totalAmount) * 100 : 0
+            const isPayOpen = payInputId === d.id
+            const isHovered = hoveredId === d.id
+            const dateObj = new Date(d.date + 'T00:00:00')
+            const dateStr = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
-      {tab === 'settled' && settled.length === 0 && (
-        <div
-          className="rounded-2xl p-6 text-center"
-          style={{
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-          }}
-        >
-          <p className="text-2xl mb-2">📭</p>
-          <p className="text-sm" style={{ color: '#6E6E73' }}>
-            No settled debts yet.
-          </p>
-        </div>
-      )}
-
-      {(tab === 'outstanding' ? outstanding : settled).map((debtor, idx) => {
-        const progress = selectDebtorProgress(state, debtor.id)
-        const avatarColor = AVATAR_COLORS[idx % AVATAR_COLORS.length]!
-        const isPaying = payingId === debtor.id
-
-        return (
-          <div
-            key={debtor.id}
-            className="rounded-2xl overflow-hidden"
-            style={{
-              backgroundColor: '#FFFFFF',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-            }}
-          >
-            <div className="p-4">
-              <div className="flex items-start gap-3">
-                {/* Avatar */}
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0"
-                  style={{
-                    backgroundColor: avatarColor,
-                    opacity: debtor.settled ? 0.5 : 1,
-                  }}
-                >
-                  {getInitials(debtor.name)}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold" style={{ color: '#1D1D1F' }}>{debtor.name}</span>
-                    {debtor.settled ? (
-                      <span
-                        className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium"
-                        style={{ backgroundColor: '#EAFAF0', color: '#34C759' }}
-                      >
-                        ✓ Settled
-                      </span>
+            return (
+              <div
+                key={d.id}
+                style={{ background: P.card, borderRadius: 16, boxShadow: P.shadowSm, padding: '18px 20px' }}
+                onMouseEnter={() => setHoveredId(d.id)}
+                onMouseLeave={() => setHoveredId(null)}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                  {/* Avatar */}
+                  <div style={{
+                    width: 42, height: 42, borderRadius: 21,
+                    background: d.settled ? P.green.soft : d.avatarColor,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: d.settled ? P.green.text : '#fff',
+                    fontWeight: 600, fontSize: 15, flexShrink: 0,
+                  }}>
+                    {d.settled ? '✓' : d.initials}
+                  </div>
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: P.ink }}>{d.name}</div>
+                    <div style={{ fontSize: 12, color: P.tertiary }}>{d.reason} · {dateStr}</div>
+                  </div>
+                  {/* Amounts */}
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    {d.settled ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: P.green.text, fontSize: 13, fontWeight: 600 }}>Settled</span>
+                        {isHovered && (
+                          <button onClick={() => removeDebtor(d.id)} style={removeBtnStyle}>
+                            Remove
+                          </button>
+                        )}
+                      </div>
                     ) : (
-                      <Money
-                        cents={progress.remainingCents}
-                        className="text-lg font-semibold"
-                      />
+                      <>
+                        <div className="mono" style={{ fontSize: 18, fontWeight: 500, color: P.ink }}>
+                          {fmt(remaining)}
+                        </div>
+                        <div style={{ fontSize: 12, color: P.tertiary }}>
+                          of {fmt(d.totalAmount)}
+                        </div>
+                      </>
                     )}
                   </div>
+                </div>
 
-                  {/* Secondary info */}
-                  <p className="text-xs mt-0.5" style={{ color: '#6E6E73' }}>
-                    {debtor.reason ? `${debtor.reason} · ` : ''}{shortDate(debtor.date)}
-                  </p>
+                {/* Progress + actions (outstanding only) */}
+                {!d.settled && (
+                  <div style={{ marginTop: 14 }}>
+                    {/* Progress bar */}
+                    <div style={{ height: 6, borderRadius: 3, background: P.blue.soft, overflow: 'hidden', marginBottom: 6 }}>
+                      <div style={{
+                        height: '100%', borderRadius: 3,
+                        background: P.blue.solid,
+                        width: `${pct}%`,
+                        transition: 'width 0.3s',
+                      }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span className="mono" style={{ fontSize: 12, color: P.tertiary }}>
+                        {fmt(d.amountPaid)} paid · {Math.round(pct)}%
+                      </span>
+                    </div>
 
-                  {!debtor.settled && (
-                    <p className="text-xs mt-0.5" style={{ color: '#6E6E73', fontFamily: "'DM Mono', monospace" }}>
-                      of {fmt(debtor.amountCents)}
-                    </p>
-                  )}
-
-                  {/* Progress bar */}
-                  {!debtor.settled && (
-                    <>
-                      <div
-                        className="mt-3 h-1.5 rounded-full overflow-hidden"
-                        style={{ backgroundColor: 'rgba(0,0,0,0.06)' }}
-                      >
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${Math.min(progress.percent, 100)}%`,
-                            backgroundColor: '#007AFF',
+                    {/* Actions */}
+                    {isPayOpen ? (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ color: P.secondary, fontSize: 14 }}>$</span>
+                        <input
+                          type="number"
+                          placeholder="0.00"
+                          value={payValue}
+                          onChange={e => setPayValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') recordPayment(d.id)
+                            if (e.key === 'Escape') setPayInputId(null)
                           }}
+                          className="mono"
+                          style={{ ...inputStyle, flex: 1, padding: '8px 12px', fontSize: 14 }}
+                          autoFocus
                         />
+                        <button onClick={() => recordPayment(d.id)} style={softBlueBtnStyle}>Record</button>
+                        <button onClick={() => setPayInputId(null)} style={softGrayBtnStyle}>Cancel</button>
                       </div>
-                      <p className="text-xs mt-1.5" style={{ color: '#6E6E73' }}>
-                        {progress.paidCents > 0 ? (
-                          <><span style={{ fontFamily: "'DM Mono', monospace" }}>{fmt(progress.paidCents)}</span> paid · {Math.round(progress.percent)}%</>
-                        ) : (
-                          'No payments yet'
-                        )}
-                      </p>
-                    </>
-                  )}
-                </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          onClick={() => { setPayInputId(d.id); setPayValue('') }}
+                          style={softBlueBtnStyle}
+                        >
+                          Record payment
+                        </button>
+                        <button
+                          onClick={() => settleDebtor(d.id)}
+                          style={softGreenBtnStyle}
+                          onMouseEnter={e => (e.currentTarget.style.background = P.green.solid, e.currentTarget.style.color = '#fff')}
+                          onMouseLeave={e => (e.currentTarget.style.background = P.green.soft, e.currentTarget.style.color = P.green.text)}
+                        >
+                          Settle
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-
-              {/* Actions */}
-              {!debtor.settled && (
-                <div className="flex gap-2 mt-4 ml-[52px]">
-                  <button
-                    onClick={() => setPayingId(isPaying ? null : debtor.id)}
-                    className="px-3 h-9 rounded-xl text-sm font-medium cursor-pointer"
-                    style={{ backgroundColor: '#EBF4FF', color: '#007AFF' }}
-                  >
-                    Record payment
-                  </button>
-                  <button
-                    onClick={() => settleDebtor(debtor.id)}
-                    className="px-3 h-9 rounded-xl text-sm font-medium cursor-pointer"
-                    style={{ backgroundColor: 'rgba(0,0,0,0.04)', color: '#1D1D1F' }}
-                  >
-                    Settle
-                  </button>
-                </div>
-              )}
-
-              {/* Delete / remove record */}
-              {debtor.settled && (
-                <div className="mt-3 ml-[52px]">
-                  <button
-                    onClick={() => removeDebtor(debtor.id)}
-                    className="group px-3 h-8 rounded-lg text-xs font-medium cursor-pointer opacity-60 hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
-                    style={{ backgroundColor: 'rgba(255,59,48,0.08)', color: '#FF3B30' }}
-                  >
-                    Remove record
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Payment panel */}
-            {isPaying && (
-              <div
-                className="px-4 py-3 flex items-center gap-3"
-                style={{
-                  backgroundColor: '#EBF4FF',
-                  borderTop: '1px solid rgba(0,122,255,0.1)',
-                }}
-              >
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder={`Max ${fmt(progress.remainingCents)}`}
-                  value={payAmount}
-                  onChange={e => setPayAmount(e.target.value)}
-                  onKeyDown={e => handlePayKeyDown(e, debtor.id)}
-                  autoFocus
-                  className="flex-1 h-10 px-3 rounded-xl text-sm outline-none"
-                  style={{
-                    backgroundColor: '#FFFFFF',
-                    border: '1.5px solid rgba(0,122,255,0.2)',
-                    color: '#1D1D1F',
-                    fontFamily: "'DM Mono', monospace",
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-                  onBlur={e => { e.currentTarget.style.borderColor = 'rgba(0,122,255,0.2)' }}
-                />
-                <button
-                  onClick={() => handlePay(debtor.id)}
-                  disabled={!payAmount.trim()}
-                  className="h-10 px-4 rounded-xl text-sm font-medium text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#007AFF' }}
-                >
-                  Confirm
-                </button>
-              </div>
-            )}
-          </div>
-        )
-      })}
+            )
+          })}
+        </div>
+      )}
     </div>
   )
+}
+
+/* ── Shared styles ─────────────────────────────────────────── */
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '12px 14px', fontSize: 15,
+  background: 'rgba(0,0,0,0.035)', borderRadius: 12,
+  border: '1.5px solid transparent', outline: 'none',
+  color: P.ink, fontFamily: 'inherit',
+}
+
+const blueBtnStyle: React.CSSProperties = {
+  flex: 1, padding: '12px 0', borderRadius: 12,
+  background: P.blue.solid, color: '#fff',
+  border: 'none', cursor: 'pointer',
+  fontSize: 15, fontWeight: 600, fontFamily: 'inherit',
+}
+
+const grayBtnStyle: React.CSSProperties = {
+  padding: '12px 20px', borderRadius: 12,
+  background: 'rgba(0,0,0,0.05)', color: P.secondary,
+  border: 'none', cursor: 'pointer',
+  fontSize: 15, fontWeight: 500, fontFamily: 'inherit',
+}
+
+const softBlueBtnStyle: React.CSSProperties = {
+  padding: '8px 14px', borderRadius: 10,
+  background: P.blue.soft, color: P.blue.text,
+  border: 'none', cursor: 'pointer',
+  fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+  transition: 'background 0.15s',
+}
+
+const softGreenBtnStyle: React.CSSProperties = {
+  padding: '8px 14px', borderRadius: 10,
+  background: P.green.soft, color: P.green.text,
+  border: 'none', cursor: 'pointer',
+  fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+  transition: 'background 0.15s, color 0.15s',
+}
+
+const softGrayBtnStyle: React.CSSProperties = {
+  padding: '8px 14px', borderRadius: 10,
+  background: 'rgba(0,0,0,0.05)', color: P.secondary,
+  border: 'none', cursor: 'pointer',
+  fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
+}
+
+const removeBtnStyle: React.CSSProperties = {
+  padding: '4px 10px', borderRadius: 8,
+  background: 'rgba(0,0,0,0.04)', color: P.tertiary,
+  border: 'none', cursor: 'pointer',
+  fontSize: 12, fontWeight: 500, fontFamily: 'inherit',
 }

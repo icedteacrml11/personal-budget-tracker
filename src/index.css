@@ -1,35 +1,32 @@
-@import '@fontsource/inter/300.css';
-@import '@fontsource/inter/400.css';
-@import '@fontsource/inter/500.css';
-@import '@fontsource/inter/600.css';
-@import '@fontsource/inter/700.css';
-@import '@fontsource/dm-mono/400.css';
-@import '@fontsource/dm-mono/500.css';
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
 @import 'tailwindcss';
 
 @theme {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Poppins', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'DM Mono', ui-monospace, monospace;
 
-  --color-page: #F5F5F7;
+  --color-bg: #F4F4F6;
   --color-card: #FFFFFF;
-  --color-blue: #007AFF;
-  --color-blue-hover: #0066DD;
-  --color-green: #34C759;
-  --color-green-hover: #2DAE4E;
-  --color-green-bg: #EAFAF0;
-  --color-red: #FF3B30;
-  --color-red-bg: #FFF0EF;
-  --color-orange: #FF9500;
-  --color-purple: #AF52DE;
-  --color-teal: #30B0C7;
-  --color-indigo: #5856D6;
-  --color-label: #1D1D1F;
-  --color-secondary: #6E6E73;
-  --color-muted: #AEAEB2;
-  --color-blue-tint: #EBF4FF;
+  --color-ink: #1A1A1C;
+  --color-secondary: #67676C;
+  --color-tertiary: #9A9AA0;
+  --color-hair: rgba(0, 0, 0, 0.06);
 
-  --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  --color-blue-text: #0A62D6;
+  --color-blue-solid: #0A6CFF;
+  --color-blue-hover: #0954C8;
+  --color-blue-soft: #EAF1FE;
+
+  --color-green-text: #0B845B;
+  --color-green-solid: #12A66F;
+  --color-green-soft: #E7F6EF;
+
+  --color-red-text: #C4362C;
+  --color-red-solid: #E5453A;
+  --color-red-soft: #FBEBE9;
+
+  --shadow-sm: 0 1px 2px rgba(17, 20, 45, 0.05), 0 4px 12px rgba(17, 20, 45, 0.04);
+  --shadow-md: 0 1px 3px rgba(17, 20, 45, 0.06), 0 8px 24px rgba(17, 20, 45, 0.05);
 }
 
 /* ——— Global styles ——— */
@@ -41,8 +38,19 @@ html {
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--color-page);
-  color: var(--color-label);
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+}
+
+/* Selection tint */
+::selection {
+  background-color: rgba(10, 108, 255, 0.15);
+}
+
+/* Tabular figures on mono text */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Hide scrollbars globally */
@@ -56,7 +64,7 @@ body {
 
 /* Focus ring */
 :focus-visible {
-  outline: 2px solid rgba(0, 122, 255, 0.4);
+  outline: 2px solid rgba(10, 108, 255, 0.4);
   outline-offset: 2px;
 }
 
@@ -71,14 +79,5 @@ body {
 
 /* Hairline divider utility */
 .hairline {
-  border-color: rgba(0, 0, 0, 0.07);
-}
-
-/* Safe area padding */
-.safe-top {
-  padding-top: env(safe-area-inset-top, 0px);
-}
-
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-color: rgba(0, 0, 0, 0.06);
 }

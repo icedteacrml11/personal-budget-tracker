@@ -1,454 +1,331 @@
-/**
- * HomeView — monthly overview with editorial layout.
- * Balance headline, add-money form, stats, spending breakdown, money-in list.
- */
-
 import { useState, useMemo } from 'react'
-import { useBudget, useMoney, selectMonthTotals, selectSpendingByCategory, selectMonthTransactions, catMeta, categoryNames } from '../store'
-import { Money } from '../components/Money'
-import { AddButton } from '../components/AddButton'
-import { DateChip } from '../components/DateChip'
-import { todayStr, monthKey, addMonths, monthLabel, shortDate } from '../lib/dates'
-import { toCents } from '../lib/money'
+import { useBudget, P, fmt, fmtShort, catMeta, INCOME_CATEGORIES } from '../store'
+
+/* ── helpers ──────────────────────────────────────────────── */
+
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+function monthKey(year: number, month: number) {
+  return `${year}-${String(month + 1).padStart(2, '0')}`
+}
+
+/* ── component ────────────────────────────────────────────── */
 
 export function HomeView() {
-  const { state, balanceCents, addTransaction, removeTransaction, loadDemoData } = useBudget()
-  const { fmt } = useMoney()
+  const { transactions, balance, addTransaction } = useBudget()
+  const now = new Date()
+  const [selYear] = useState(2026)
+  const [selMonth, setSelMonth] = useState(now.getMonth()) // 0-indexed
+  const [showAdd, setShowAdd] = useState(false)
 
-  const today = todayStr()
-  const [selectedMonth, setSelectedMonth] = useState(monthKey(today))
-  const [showAddMoney, setShowAddMoney] = useState(false)
-  const [amountInput, setAmountInput] = useState('')
-  const [category, setCategory] = useState('Allowance')
-  const [note, setNote] = useState('')
-  const [date, setDate] = useState(today)
-  const [amountError, setAmountError] = useState('')
+  // Form
+  const [addAmt, setAddAmt] = useState('')
+  const [addSource, setAddSource] = useState(Object.keys(INCOME_CATEGORIES)[0]!)
+  const [addNote, setAddNote] = useState('')
 
-  const monthTotals = useMemo(() => selectMonthTotals(state, selectedMonth), [state, selectedMonth])
-  const spending = useMemo(() => selectSpendingByCategory(state, selectedMonth), [state, selectedMonth])
-  const incomeTransactions = useMemo(
-    () => selectMonthTransactions(state, selectedMonth, 'income'),
-    [state, selectedMonth]
+  const mk = monthKey(selYear, selMonth)
+
+  // Filter transactions for selected month
+  const monthTxs = useMemo(() =>
+    transactions.filter(tx => tx.date.startsWith(mk)),
+    [transactions, mk]
   )
 
-  const currentMonth = monthKey(today)
-  const isCurrentMonth = selectedMonth === currentMonth
+  const income = useMemo(() => monthTxs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0), [monthTxs])
+  const spent  = useMemo(() => monthTxs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0), [monthTxs])
+  const net = income - spent
 
-  const isEmpty = state.transactions.length === 0
-
-  const handleAddMoney = () => {
-    const cents = toCents(amountInput)
-    if (!cents) {
-      setAmountError('Enter an amount greater than $0.')
-      return
+  // Category breakdown
+  const breakdown = useMemo(() => {
+    const map = new Map<string, number>()
+    let total = 0
+    for (const tx of monthTxs) {
+      if (tx.type === 'expense') {
+        map.set(tx.category, (map.get(tx.category) ?? 0) + tx.amount)
+        total += tx.amount
+      }
     }
-    setAmountError('')
+    return Array.from(map.entries())
+      .map(([category, amount]) => ({ category, amount, percent: total > 0 ? (amount / total) * 100 : 0 }))
+      .sort((a, b) => b.amount - a.amount)
+  }, [monthTxs])
+
+  const totalSpent = breakdown.reduce((s, b) => s + b.amount, 0)
+
+  function handleAdd() {
+    const n = parseFloat(addAmt)
+    if (!n || n <= 0) return
     addTransaction({
       type: 'income',
-      amountCents: cents,
-      label: note.trim() || category,
-      category,
-      date,
+      amount: Math.round(n * 100) / 100,
+      label: addNote.trim() || addSource,
+      category: addSource,
+      date: new Date().toISOString().slice(0, 10),
     })
-    setAmountInput('')
-    setNote('')
-    setDate(todayStr())
-    setShowAddMoney(false)
-    // Jump to the transaction's month
-    setSelectedMonth(monthKey(date))
+    setAddAmt(''); setAddNote(''); setShowAdd(false)
+    // Jump to current month
+    setSelMonth(new Date().getMonth())
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      handleAddMoney()
-    }
-  }
-
-  const totalSpending = spending.reduce((sum, s) => sum + s.amountCents, 0)
-  const saveRate = monthTotals.income > 0
-    ? Math.round((monthTotals.net / monthTotals.income) * 100)
-    : null
+  const saveRate = income > 0 ? Math.round((net / income) * 100) : 0
 
   return (
-    <div className="space-y-6">
-      {/* Month picker */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setSelectedMonth(addMonths(selectedMonth, -1))}
-            className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer"
-            style={{ backgroundColor: 'rgba(0,0,0,0.04)' }}
-            aria-label="Previous month"
-          >
-            <svg width="8" height="14" viewBox="0 0 8 14" fill="none">
-              <path d="M7 1L1 7L7 13" stroke="#6E6E73" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          <h2 className="text-lg font-semibold" style={{ color: '#1D1D1F' }}>
-            {monthLabel(selectedMonth)}
-          </h2>
-          <button
-            onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}
-            className="w-9 h-9 rounded-full flex items-center justify-center cursor-pointer"
-            style={{ backgroundColor: 'rgba(0,0,0,0.04)' }}
-            aria-label="Next month"
-          >
-            <svg width="8" height="14" viewBox="0 0 8 14" fill="none">
-              <path d="M1 1L7 7L1 13" stroke="#6E6E73" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
-        {!isCurrentMonth && (
-          <button
-            onClick={() => setSelectedMonth(currentMonth)}
-            className="px-3 py-1 rounded-full text-xs font-medium cursor-pointer"
-            style={{ backgroundColor: '#EBF4FF', color: '#007AFF' }}
-          >
-            Today
-          </button>
-        )}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* ── Month picker ──────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+        <button
+          onClick={() => setSelMonth(m => m === 0 ? 11 : m - 1)}
+          style={ghostBtn}
+        >
+          ‹
+        </button>
+        <span style={{ fontSize: 16, fontWeight: 500, color: P.ink, minWidth: 180, textAlign: 'center' }}>
+          {MONTHS[selMonth]} {selYear}
+        </span>
+        <button
+          onClick={() => setSelMonth(m => m === 11 ? 0 : m + 1)}
+          style={ghostBtn}
+        >
+          ›
+        </button>
       </div>
 
-      {/* First-run empty state */}
-      {isEmpty && (
-        <div
-          className="rounded-2xl p-6"
-          style={{
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-          }}
-        >
-          <p className="text-base font-medium mb-2" style={{ color: '#1D1D1F' }}>
-            Nothing here yet
-          </p>
-          <p className="text-sm mb-5" style={{ color: '#6E6E73' }}>
-            Set your opening balance in Settings, or add your first allowance.
-          </p>
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowAddMoney(true)}
-              className="px-4 h-10 rounded-xl text-sm font-medium text-white cursor-pointer"
-              style={{ backgroundColor: '#007AFF' }}
-            >
-              Add money
-            </button>
-            <button
-              onClick={loadDemoData}
-              className="px-4 h-10 rounded-xl text-sm font-medium cursor-pointer"
-              style={{ backgroundColor: 'rgba(0,0,0,0.04)', color: '#007AFF' }}
-            >
-              Load demo data
-            </button>
-          </div>
+      {/* ── Balance headline ──────────────────────────────── */}
+      <div style={{ textAlign: 'center' }}>
+        <div style={sectionLabel}>AVAILABLE BALANCE</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+          <span
+            className="mono"
+            style={{
+              fontSize: 52, fontWeight: 500,
+              color: balance < 0 ? P.red.text : P.ink,
+              lineHeight: 1.1,
+            }}
+          >
+            {fmt(balance)}
+          </span>
+          <button
+            onClick={() => setShowAdd(v => !v)}
+            style={{
+              width: 44, height: 44, borderRadius: 22,
+              background: P.blue.solid, border: 'none', cursor: 'pointer',
+              color: '#fff', fontSize: 24, fontWeight: 300,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 2px 10px rgba(10,108,255,0.25)',
+              transition: 'transform 0.2s, background 0.15s',
+              transform: showAdd ? 'rotate(45deg)' : 'rotate(0deg)',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = P.blue.hover)}
+            onMouseLeave={e => (e.currentTarget.style.background = P.blue.solid)}
+          >
+            +
+          </button>
         </div>
-      )}
-
-      {/* Balance headline */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-widest mb-1" style={{ color: '#6E6E73' }}>
-            Available Balance
-          </p>
-          <div className="whitespace-nowrap" style={{ letterSpacing: '-0.02em' }}>
-            <Money cents={balanceCents} className="text-4xl sm:text-5xl font-medium" />
-          </div>
-          <p className="text-sm mt-1" style={{ color: monthTotals.net >= 0 ? '#34C759' : '#FF3B30' }}>
-            <Money cents={monthTotals.net} signed short /> net in {monthLabel(selectedMonth)}
-          </p>
+        <div style={{ marginTop: 8, fontSize: 14, color: net >= 0 ? P.green.text : P.red.text, fontWeight: 500 }}>
+          {net >= 0 ? '+' : '\u2212'}
+          {fmt(Math.abs(net)).replace('$', '$')} net in {MONTHS[selMonth]}
         </div>
-        <AddButton isOpen={showAddMoney} onClick={() => setShowAddMoney(!showAddMoney)} label="Add money" />
       </div>
 
-      {/* Add money form */}
-      {showAddMoney && (
-        <div
-          className="rounded-2xl p-5"
-          style={{
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-          }}
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-            <div>
+      {/* ── Add money form ────────────────────────────────── */}
+      {showAdd && (
+        <div style={{ ...cardStyle, borderRadius: 24, padding: 24, boxShadow: P.shadowMd }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Amount */}
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: P.secondary, fontSize: 16 }}>$</span>
               <input
-                type="text"
-                inputMode="decimal"
-                placeholder="Amount"
-                value={amountInput}
-                onChange={(e) => { setAmountInput(e.target.value); setAmountError('') }}
-                onKeyDown={handleKeyDown}
-                className="w-full h-11 px-3 rounded-xl text-sm outline-none"
-                style={{
-                  backgroundColor: 'rgba(0,0,0,0.04)',
-                  border: amountError ? '1.5px solid #FF3B30' : '1.5px solid transparent',
-                  color: '#1D1D1F',
-                  fontFamily: "'DM Mono', monospace",
-                }}
-                onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-                onBlur={e => { e.currentTarget.style.borderColor = amountError ? '#FF3B30' : 'transparent' }}
+                type="number"
+                placeholder="0.00"
+                value={addAmt}
+                onChange={e => setAddAmt(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                className="mono"
+                style={{ ...inputStyle, paddingLeft: 32 }}
                 autoFocus
               />
-              {amountError && <p className="text-xs mt-1" style={{ color: '#FF3B30' }}>{amountError}</p>}
             </div>
+            {/* Source */}
             <select
-              value={category}
-              onChange={e => setCategory(e.target.value)}
-              className="h-11 px-3 rounded-xl text-sm outline-none cursor-pointer"
-              style={{
-                backgroundColor: 'rgba(0,0,0,0.04)',
-                border: '1.5px solid transparent',
-                color: '#1D1D1F',
-              }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
+              value={addSource}
+              onChange={e => setAddSource(e.target.value)}
+              style={inputStyle}
             >
-              {categoryNames('income').map(c => (
-                <option key={c} value={c}>{c}</option>
+              {Object.keys(INCOME_CATEGORIES).map(c => (
+                <option key={c}>{c}</option>
               ))}
             </select>
-          </div>
-          <div className="flex gap-3 items-center">
+            {/* Note */}
             <input
               type="text"
               placeholder="Note (optional)"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              onKeyDown={handleKeyDown}
-              className="flex-1 h-11 px-3 rounded-xl text-sm outline-none"
-              style={{
-                backgroundColor: 'rgba(0,0,0,0.04)',
-                border: '1.5px solid transparent',
-                color: '#1D1D1F',
-              }}
-              onFocus={e => { e.currentTarget.style.borderColor = '#007AFF' }}
-              onBlur={e => { e.currentTarget.style.borderColor = 'transparent' }}
+              value={addNote}
+              onChange={e => setAddNote(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdd()}
+              style={inputStyle}
             />
-            <DateChip value={date} onChange={setDate} />
-          </div>
-          <button
-            onClick={handleAddMoney}
-            disabled={!amountInput.trim()}
-            className="mt-4 w-full h-11 rounded-xl text-sm font-medium text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: '#34C759' }}
-          >
-            Add to balance
-          </button>
-        </div>
-      )}
-
-      {/* Stats strip */}
-      {!isEmpty && (
-        <div
-          className="rounded-2xl flex"
-          style={{
-            backgroundColor: '#FFFFFF',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-          }}
-        >
-          {[
-            { label: 'Income', value: monthTotals.income, color: '#34C759' },
-            { label: 'Spent', value: monthTotals.spent, color: '#FF3B30' },
-            { label: 'Net', value: monthTotals.net, color: monthTotals.net >= 0 ? '#1D1D1F' : '#FF3B30' },
-          ].map((stat, i) => (
-            <div
-              key={stat.label}
-              className="flex-1 py-4 px-4 text-center"
-              style={i > 0 ? { borderLeft: '1px solid rgba(0,0,0,0.06)' } : {}}
-            >
-              <p className="text-[11px] font-medium uppercase tracking-wide mb-1" style={{ color: '#6E6E73' }}>
-                {stat.label}
-              </p>
-              <Money cents={stat.value} short className="text-lg font-medium" style={{ color: stat.color, fontFamily: "'DM Mono', monospace" }} />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Where it went */}
-      {!isEmpty && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: '#6E6E73' }}>
-              Where it went
-            </p>
-            {totalSpending > 0 && (
-              <p className="text-sm" style={{ color: '#6E6E73', fontFamily: "'DM Mono', monospace" }}>
-                {fmt(totalSpending)} total
-              </p>
-            )}
-          </div>
-
-          {spending.length === 0 ? (
-            <div
-              className="rounded-2xl p-5 text-center"
-              style={{
-                backgroundColor: '#FFFFFF',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-              }}
-            >
-              <p className="text-sm" style={{ color: '#6E6E73' }}>No spending this month</p>
-            </div>
-          ) : (
-            <>
-              {/* Proportion bar */}
-              <div className="flex gap-[1px] mb-3 h-1.5 rounded-full overflow-hidden">
-                {spending.map(s => {
-                  const meta = catMeta('expense', s.category)
-                  return (
-                    <div
-                      key={s.category}
-                      style={{
-                        width: `${s.percent}%`,
-                        backgroundColor: meta.color,
-                        minWidth: '3px',
-                      }}
-                    />
-                  )
-                })}
-              </div>
-
-              {/* Category rows */}
-              <div
-                className="rounded-2xl overflow-hidden"
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-                }}
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={handleAdd} style={greenBtnStyle}>
+                Add to balance
+              </button>
+              <button
+                onClick={() => setShowAdd(false)}
+                style={{ ...grayBtnStyle }}
               >
-                {spending.map((s, i) => {
-                  const meta = catMeta('expense', s.category)
-                  const pct = s.percent < 1 && s.percent > 0 ? '<1' : Math.round(s.percent)
-                  return (
-                    <div
-                      key={s.category}
-                      className="relative flex items-center px-4 py-3"
-                      style={i > 0 ? { borderTop: '1px solid rgba(0,0,0,0.06)' } : {}}
-                    >
-                      {/* Background fill */}
-                      <div
-                        className="absolute inset-0"
-                        style={{
-                          width: `${s.percent}%`,
-                          backgroundColor: `${meta.color}09`,
-                        }}
-                      />
-                      <div className="relative flex items-center justify-between w-full">
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ backgroundColor: meta.color }}
-                          />
-                          <span className="text-sm font-medium" style={{ color: '#1D1D1F' }}>
-                            {s.category}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs" style={{ color: '#6E6E73', fontFamily: "'DM Mono', monospace" }}>
-                            {pct}%
-                          </span>
-                          <Money cents={s.amountCents} className="text-sm font-medium" />
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          )}
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Save rate */}
-      {saveRate !== null && (
-        <p className="text-sm text-center" style={{ color: '#6E6E73' }}>
-          Save rate this month{' '}
-          <span
-            className="font-semibold"
-            style={{
-              color: saveRate >= 0 ? '#34C759' : '#FF3B30',
-              fontFamily: "'DM Mono', monospace",
-            }}
-          >
-            {saveRate}%
-          </span>
-        </p>
-      )}
+      {/* ── Stats strip ───────────────────────────────────── */}
+      <div style={{ ...cardStyle, borderRadius: 16, display: 'flex', padding: 0 }}>
+        <StatCell label="Income" value={fmtShort(income)} color={P.green.text} />
+        <div style={{ width: 1, background: P.hair, alignSelf: 'stretch' }} />
+        <StatCell label="Spent" value={fmtShort(spent)} color={P.red.text} />
+        <div style={{ width: 1, background: P.hair, alignSelf: 'stretch' }} />
+        <StatCell label="Net" value={fmtShort(net)} color={net < 0 ? P.red.text : P.ink} />
+      </div>
 
-      {/* Money in */}
-      {!isEmpty && (
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-widest mb-3" style={{ color: '#6E6E73' }}>
-            Money in
-          </p>
+      {/* ── Spending breakdown ────────────────────────────── */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, padding: '0 4px' }}>
+          <span style={sectionLabel}>WHERE IT WENT</span>
+          <span className="mono" style={{ fontSize: 13, color: P.secondary, fontWeight: 500 }}>{fmt(totalSpent)}</span>
+        </div>
 
-          {incomeTransactions.length === 0 ? (
-            <div
-              className="rounded-2xl p-5 text-center"
-              style={{
-                backgroundColor: '#FFFFFF',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-              }}
-            >
-              <p className="text-sm" style={{ color: '#6E6E73' }}>No income this month</p>
+        {breakdown.length === 0 ? (
+          <div style={{ ...cardStyle, borderRadius: 16, padding: 32, textAlign: 'center', color: P.tertiary, fontSize: 14 }}>
+            No spending this month
+          </div>
+        ) : (
+          <>
+            {/* Stacked bar */}
+            <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 12 }}>
+              {breakdown.map(b => (
+                <div
+                  key={b.category}
+                  style={{
+                    width: `${b.percent}%`,
+                    background: catMeta('expense', b.category).color,
+                    transition: 'width 0.3s',
+                  }}
+                />
+              ))}
             </div>
-          ) : (
-            <div
-              className="rounded-2xl overflow-hidden"
-              style={{
-                backgroundColor: '#FFFFFF',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)',
-              }}
-            >
-              {incomeTransactions.map((tx, i) => {
-                const meta = catMeta('income', tx.category)
-                const isRepayment = tx.source?.kind === 'repayment'
+
+            {/* Category rows */}
+            <div style={{ ...cardStyle, borderRadius: 16, padding: 0, overflow: 'hidden' }}>
+              {breakdown.map((b, i) => {
+                const meta = catMeta('expense', b.category)
                 return (
                   <div
-                    key={tx.id}
-                    className="group flex items-center px-4 py-2.5"
-                    style={i > 0 ? { borderTop: '1px solid rgba(0,0,0,0.06)' } : {}}
+                    key={b.category}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '14px 18px',
+                      borderTop: i > 0 ? `1px solid ${P.hair}` : 'none',
+                      position: 'relative',
+                    }}
                   >
+                    {/* Tinted fill bar */}
                     <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0"
-                      style={{ backgroundColor: `${meta.color}15` }}
-                    >
-                      {meta.emoji}
-                    </div>
-                    <div className="ml-3 flex-1 min-w-0">
-                      <span className="text-sm font-medium truncate block" style={{ color: '#1D1D1F' }}>
-                        {tx.label}
-                      </span>
-                    </div>
-                    {isRepayment && (
-                      <span
-                        className="hidden sm:inline-flex px-2 py-0.5 rounded-md text-[10px] font-medium mr-2"
-                        style={{ backgroundColor: '#EBF4FF', color: '#007AFF' }}
-                      >
-                        Repayment
-                      </span>
-                    )}
-                    <span className="text-xs mr-3 shrink-0 w-12 text-right" style={{ color: '#6E6E73' }}>
-                      {shortDate(tx.date)}
+                      style={{
+                        position: 'absolute', left: 0, top: 0, bottom: 0,
+                        width: `${b.percent}%`,
+                        background: meta.color,
+                        opacity: 0.07,
+                        transition: 'width 0.3s',
+                      }}
+                    />
+                    {/* Dot */}
+                    <div style={{ width: 10, height: 10, borderRadius: 5, background: meta.color, flexShrink: 0, zIndex: 1 }} />
+                    {/* Name */}
+                    <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: P.ink, zIndex: 1 }}>{b.category}</span>
+                    {/* Percent */}
+                    <span className="mono" style={{ fontSize: 13, color: P.tertiary, width: 48, textAlign: 'right', zIndex: 1 }}>
+                      {Math.round(b.percent)}%
                     </span>
-                    <Money cents={tx.amountCents} signed className="text-sm font-medium shrink-0" style={{ color: '#34C759', fontFamily: "'DM Mono', monospace" }} />
-                    <button
-                      onClick={() => removeTransaction(tx.id)}
-                      className="ml-2 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 cursor-pointer opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
-                      style={{ backgroundColor: 'rgba(255,59,48,0.08)' }}
-                      aria-label={`Delete ${tx.label}`}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                        <path d="M2 2L10 10M10 2L2 10" stroke="#FF3B30" strokeWidth="1.5" strokeLinecap="round" />
-                      </svg>
-                    </button>
+                    {/* Amount */}
+                    <span className="mono" style={{ fontSize: 14, fontWeight: 500, color: P.ink, width: 90, textAlign: 'right', zIndex: 1 }}>
+                      {fmt(b.amount)}
+                    </span>
                   </div>
                 )
               })}
             </div>
-          )}
-        </div>
-      )}
+          </>
+        )}
+
+        {/* Save rate */}
+        {income > 0 && (
+          <div style={{ textAlign: 'center', marginTop: 14, fontSize: 13, color: P.tertiary }}>
+            Save rate this month: <span style={{ fontWeight: 600, color: saveRate >= 0 ? P.green.text : P.red.text }}>{saveRate}%</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
+
+/* ── Sub-components ────────────────────────────────────────── */
+
+function StatCell({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div style={{ flex: 1, padding: '18px 16px', textAlign: 'center' }}>
+      <div style={{ fontSize: 12, color: P.tertiary, marginBottom: 4, fontWeight: 500 }}>{label}</div>
+      <div className="mono" style={{ fontSize: 20, fontWeight: 500, color }}>{value}</div>
+    </div>
+  )
+}
+
+/* ── Shared styles ─────────────────────────────────────────── */
+
+const sectionLabel: React.CSSProperties = {
+  fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em',
+  color: P.tertiary, fontWeight: 500,
+}
+
+const cardStyle: React.CSSProperties = {
+  background: P.card,
+  borderRadius: 16,
+  boxShadow: P.shadowSm,
+  padding: 20,
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '12px 14px', fontSize: 15,
+  background: 'rgba(0,0,0,0.035)', borderRadius: 12,
+  border: '1.5px solid transparent', outline: 'none',
+  color: P.ink, fontFamily: 'inherit',
+  transition: 'border-color 0.15s',
+}
+
+const ghostBtn: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18,
+  border: 'none', background: 'transparent', cursor: 'pointer',
+  fontSize: 20, color: P.secondary, display: 'flex',
+  alignItems: 'center', justifyContent: 'center',
+  fontFamily: 'inherit',
+  transition: 'background 0.15s',
+}
+
+const greenBtnStyle: React.CSSProperties = {
+  flex: 1, padding: '12px 0', borderRadius: 12,
+  background: P.green.solid, color: '#fff',
+  border: 'none', cursor: 'pointer',
+  fontSize: 15, fontWeight: 600, fontFamily: 'inherit',
+  transition: 'background 0.15s',
+}
+
+const grayBtnStyle: React.CSSProperties = {
+  padding: '12px 20px', borderRadius: 12,
+  background: 'rgba(0,0,0,0.05)', color: P.secondary,
+  border: 'none', cursor: 'pointer',
+  fontSize: 15, fontWeight: 500, fontFamily: 'inherit',
+  transition: 'background 0.15s',
+}
+
+// Focus style for inputs via CSS — applied globally in index.css
