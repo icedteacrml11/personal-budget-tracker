@@ -142,6 +142,9 @@ export interface Debtor {
 }
 
 interface StoreState {
+  settings: {
+    displayName: string
+  }
   openingBalance: number
   transactions: Transaction[]
   wallets: WalletAccount[]
@@ -160,6 +163,7 @@ type Action =
   | { type: 'ADD_DEBTOR'; debtor: Debtor }
   | { type: 'UPDATE_DEBTOR'; id: string; amountPaid: number; settled: boolean }
   | { type: 'REMOVE_DEBTOR'; id: string }
+  | { type: 'UPDATE_SETTINGS'; payload: Partial<StoreState['settings']> }
 
 /* ───────────────────── Reducer ────────────────────────────── */
 
@@ -173,7 +177,10 @@ function reducer(s: StoreState, a: Action): StoreState {
     case 'REMOVE_BILL_PAYMENT': return { ...s, billPayments: s.billPayments.filter(bp => bp.id !== a.paymentId) }
     case 'ADD_DEBTOR': return { ...s, debtors: [a.debtor, ...s.debtors] }
     case 'UPDATE_DEBTOR': return { ...s, debtors: s.debtors.map(d => d.id === a.id ? { ...d, amountPaid: a.amountPaid, settled: a.settled } : d) }
-    case 'REMOVE_DEBTOR': return { ...s, debtors: s.debtors.filter(d => d.id !== a.id) }
+    case 'REMOVE_DEBTOR':
+      return { ...s, debtors: s.debtors.filter(d => d.id !== a.id) }
+    case 'UPDATE_SETTINGS':
+      return { ...s, settings: { ...s.settings, ...a.payload } }
   }
 }
 
@@ -210,7 +217,18 @@ function loadState(): StoreState {
   try {
     // 1. Try to load v3 (current)
     const rawV3 = localStorage.getItem(STORAGE_KEY)
-    if (rawV3) return JSON.parse(rawV3) as StoreState
+    if (rawV3) {
+      const v3 = JSON.parse(rawV3) as StoreState
+      // Patch settings if missing (for users who migrated before settings was added to v3)
+      if (!v3.settings) {
+        v3.settings = { displayName: 'Taylor Brooks' }
+      }
+      
+      // If v3 has data, return it. If it's completely empty (fallback state), ignore it and try migrating old data again.
+      if (v3.transactions.length > 0 || v3.wallets.some(w => w.balance !== 0) || v3.bills.length > 0 || v3.debtors.length > 0 || v3.settings.displayName !== 'Taylor Brooks') {
+        return v3
+      }
+    }
   } catch { /* ignore */ }
 
   try {
@@ -218,7 +236,10 @@ function loadState(): StoreState {
     const rawV2 = localStorage.getItem(OLD_V2_KEY)
     if (rawV2) {
       const old = JSON.parse(rawV2)
-      
+      const settings = {
+        displayName: old.settings?.displayName || 'Taylor Brooks'
+      }
+
       const transactions = (old.transactions || []).map((t: any) => ({
         id: t.id,
         type: t.type,
@@ -266,7 +287,8 @@ function loadState(): StoreState {
       })
 
       const migrated: StoreState = {
-        openingBalance: (old.settings?.openingBalanceCents || 0) / 100,
+        settings,
+        openingBalance: (old.settings?.openingBalanceCents || old.openingBalanceCents || 0) / 100,
         transactions,
         wallets,
         bills,
@@ -303,8 +325,12 @@ function loadState(): StoreState {
       })
 
       const openingBalance = old.settings?.openingBalance ?? old.openingBalance ?? 0
+      const settings = {
+        displayName: old.settings?.displayName || 'Taylor Brooks'
+      }
 
       const migrated: StoreState = {
+        settings,
         openingBalance,
         transactions,
         wallets: [
@@ -324,6 +350,7 @@ function loadState(): StoreState {
 
   // 4. Fallback to empty fresh state
   return {
+    settings: { displayName: 'Taylor Brooks' },
     openingBalance: 0,
     transactions: [],
     wallets: [
@@ -351,6 +378,7 @@ interface BudgetCtx extends StoreState {
   recordRepayment(debtorId: string, amount: number): void
   settleDebtor(debtorId: string): void
   removeDebtor(debtorId: string): void
+  updateSettings(settings: Partial<StoreState['settings']>): void
 }
 
 const Ctx = createContext<BudgetCtx | null>(null)
@@ -431,6 +459,10 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'REMOVE_DEBTOR', id })
   }, [])
 
+  const updateSettings = useCallback((settings: Partial<StoreState['settings']>) => {
+    dispatch({ type: 'UPDATE_SETTINGS', payload: settings })
+  }, [])
+
   return (
     <Ctx.Provider value={{
       ...state,
@@ -443,6 +475,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
       recordRepayment,
       settleDebtor,
       removeDebtor,
+      updateSettings,
     }}>
       {children}
     </Ctx.Provider>

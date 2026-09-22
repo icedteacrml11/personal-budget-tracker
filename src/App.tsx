@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { BudgetProvider, P } from './store'
+import { BudgetProvider, P, useBudget } from './store'
 import { HomeView } from './views/HomeView'
 import { WalletView } from './views/WalletView'
 import { ExpensesView } from './views/ExpensesView'
 import { PeopleView } from './views/PeopleView'
+import { SettingsModal } from './components/SettingsModal'
 
 type TabId = 'home' | 'wallet' | 'expenses' | 'people'
 
@@ -49,29 +50,17 @@ const tabs: { id: TabId; label: string; icon: (active: boolean) => React.JSX.Ele
   },
 ]
 
-/* ── Avatar ─────────────────────────────────────────────────── */
-
-function Avatar({ size = 44 }: { size?: number }) {
-  return (
-    <div
-      style={{
-        width: size, height: size, borderRadius: size / 2,
-        background: 'linear-gradient(135deg, #0A6CFF, #3E93FF)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: '#fff', fontWeight: 600, fontSize: size * 0.36,
-        boxShadow: '0 2px 12px rgba(10,108,255,0.3)',
-        flexShrink: 0,
-      }}
-    >
-      TB
-    </div>
-  )
+function getInitials(name: string): string {
+  if (!name) return '?'
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
 }
 
 /* ── App Shell ──────────────────────────────────────────────── */
 
 function AppShell() {
+  const { settings } = useBudget()
   const [tab, setTab] = useState<TabId>('home')
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: P.bg }}>
@@ -89,11 +78,18 @@ function AppShell() {
           zIndex: 40,
         }}
       >
-        {/* Profile */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 8px', marginBottom: 8 }}>
-          <Avatar size={40} />
+        {/* User Profile */}
+        <div 
+          onClick={() => setSettingsOpen(true)}
+          style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 8px', marginBottom: 8, cursor: 'pointer', transition: 'opacity 0.2s' }}
+          onMouseOver={e => e.currentTarget.style.opacity = '0.8'}
+          onMouseOut={e => e.currentTarget.style.opacity = '1'}
+        >
+          <div style={{ width: 40, height: 40, borderRadius: 20, background: P.blue.solid, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: 15, flexShrink: 0 }}>
+            {getInitials(settings.displayName)}
+          </div>
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14, color: P.ink, lineHeight: 1.3 }}>Taylor Brooks</div>
+            <div style={{ fontWeight: 600, fontSize: 14, color: P.ink, lineHeight: 1.3 }}>{settings.displayName}</div>
             <div style={{ fontSize: 12, color: P.tertiary }}>Personal budget</div>
           </div>
         </div>
@@ -149,8 +145,13 @@ function AppShell() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <Avatar size={32} />
-          <div style={{ fontWeight: 600, fontSize: 15, color: P.ink }}>Taylor Brooks</div>
+          <div 
+            onClick={() => setSettingsOpen(true)}
+            style={{ width: 32, height: 32, borderRadius: 16, background: P.blue.solid, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}
+          >
+            {getInitials(settings.displayName)}
+          </div>
+          <div style={{ fontWeight: 600, fontSize: 15, color: P.ink }}>{settings.displayName}</div>
         </div>
         <nav style={{ display: 'flex', gap: 0 }}>
           {tabs.map(t => {
@@ -191,6 +192,8 @@ function AppShell() {
         {tab === 'expenses' && <ExpensesView />}
         {tab === 'people' && <PeopleView />}
       </main>
+
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }
